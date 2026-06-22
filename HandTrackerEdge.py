@@ -22,13 +22,6 @@ LANDMARK_MODEL = str(SCRIPT_DIR / "models/hand_landmark_full_sh4.blob")
 DETECTION_POSTPROCESSING_MODEL = str(SCRIPT_DIR / "custom_models/PDPostProcessing_top2_sh1.blob")
 TEMPLATE_MANAGER_SCRIPT = str(SCRIPT_DIR / "template_manager_script_duo.py")
 
-THUMB_JOINTS = (
-    "thumb_left_opposition",
-    "thumb_left_stretch",
-    "thumb_right_opposition",
-    "thumb_right_stretch",
-)
-
 
 class HandTrackerEdge:
     """
@@ -45,9 +38,7 @@ class HandTrackerEdge:
                  use_handedness_average=True,
                  single_hand_tolerance_thresh=10,
                  use_same_image=True,
-                 angle_array_final=None,
-                 debug_thumbs=False,
-                 debug_thumbs_interval=10):
+                 angle_array_final=None):
 
         self.pd_model = PALM_DETECTION_MODEL
         print(f"Palm detection blob     : {self.pd_model}")
@@ -67,8 +58,6 @@ class HandTrackerEdge:
 
         self.stats = stats
         self.trace = trace
-        self.debug_thumbs = debug_thumbs
-        self.debug_thumbs_interval = max(1, debug_thumbs_interval)
         self.use_handedness_average = use_handedness_average
         self.single_hand_tolerance_thresh = single_hand_tolerance_thresh
         self.use_same_image = use_same_image
@@ -293,97 +282,6 @@ class HandTrackerEdge:
 
         return hand
 
-    def _scale_thumb_flex(self, angle_rad: float) -> float:
-        return angle_rad * 5000 - 9000
-
-    def _scale_thumb_opposition(self, angle_rad: float) -> float:
-        return angle_rad * 5000 - 9000
-
-    def _compute_thumb_commands(
-        self,
-        index_hand_left: int,
-        index_hand_right: int,
-        angle_thumb: list,
-        angle_thumb2: list,
-    ) -> dict:
-        rad_to_deg = 180 / math.pi
-        thumb = {
-            "thumb_left_opposition": None,
-            "thumb_left_stretch": None,
-            "thumb_right_opposition": None,
-            "thumb_right_stretch": None,
-            "left_flex_deg": None,
-            "left_opp_deg": None,
-            "right_flex_deg": None,
-            "right_opp_deg": None,
-        }
-
-        if index_hand_left > -1:
-            i = index_hand_left
-            thumb["left_flex_deg"] = angle_thumb[i] * rad_to_deg
-            thumb["left_opp_deg"] = angle_thumb2[i] * rad_to_deg
-            value_flex = self._scale_thumb_flex(angle_thumb[i])
-            value_opp = self._scale_thumb_opposition(angle_thumb2[i])
-            thumb["thumb_right_opposition"] = -value_flex
-            thumb["thumb_right_stretch"] = -value_opp
-
-        if index_hand_right > -1:
-            i = index_hand_right
-            thumb["right_flex_deg"] = angle_thumb[i] * rad_to_deg
-            thumb["right_opp_deg"] = angle_thumb2[i] * rad_to_deg
-            value_flex = self._scale_thumb_flex(angle_thumb[i])
-            value_opp = self._scale_thumb_opposition(angle_thumb2[i])
-            thumb["thumb_left_opposition"] = -value_flex
-            thumb["thumb_left_stretch"] = -value_opp
-
-        return thumb
-
-    def _format_thumb_cmd(self, value, *, computed_only=False) -> str:
-        if value is None:
-            return "n/a"
-        formatted = f"{value:.0f}"
-        if computed_only:
-            return f"(computed) {formatted}"
-        return formatted
-
-    def _format_angle_pair(self, flex_deg, opp_deg) -> str:
-        if flex_deg is None:
-            return "n/a"
-        return f"flex={flex_deg:.1f} opp={opp_deg:.1f}"
-
-    def _log_thumb_debug(self, thumb: dict) -> None:
-        frame = self.fps.nb_frames()
-        if frame % self.debug_thumbs_interval != 0:
-            return
-
-        print(
-            f"[thumb] frame={frame}  "
-            f"L_opp={self._format_thumb_cmd(thumb['thumb_left_opposition'])}  "
-            f"L_str={self._format_thumb_cmd(thumb['thumb_left_stretch'], computed_only=True)}  "
-            f"R_opp={self._format_thumb_cmd(thumb['thumb_right_opposition'])}  "
-            f"R_str={self._format_thumb_cmd(thumb['thumb_right_stretch'], computed_only=True)}  "
-            f"| angles(deg) L:{self._format_angle_pair(thumb['left_flex_deg'], thumb['left_opp_deg'])}  "
-            f"R:{self._format_angle_pair(thumb['right_flex_deg'], thumb['right_opp_deg'])}",
-            flush=True,
-        )
-
-        batch_parts = []
-        for joint in THUMB_JOINTS:
-            if joint in self._pending_joint_commands:
-                batch_parts.append(f"{joint}={self._pending_joint_commands[joint]:.0f}")
-        if batch_parts:
-            print(f"[thumb] batch  {'  '.join(batch_parts)}", flush=True)
-
-    def _apply_thumb_commands(self, thumb: dict) -> None:
-        if thumb["thumb_right_stretch"] is not None:
-            self.apply_joint_trajectory(
-                "thumb_right_opposition", 2* thumb["thumb_right_stretch"]
-            )
-        if thumb["thumb_left_stretch"] is not None:
-            self.apply_joint_trajectory(
-                "thumb_left_opposition", 2* thumb["thumb_left_stretch"]
-            )
-
     def next_frame(self):
         self.fps.update()
 
@@ -435,16 +333,6 @@ class HandTrackerEdge:
             orientation = hand.handedness
 
         angle_array = []
-        thumb_debug = {
-            "thumb_left_opposition": None,
-            "thumb_left_stretch": None,
-            "thumb_right_opposition": None,
-            "thumb_right_stretch": None,
-            "left_flex_deg": None,
-            "left_opp_deg": None,
-            "right_flex_deg": None,
-            "right_opp_deg": None,
-        }
         if norm_landmarks:
             vec_thumb_low = []
             vec_thumb_high = []
@@ -489,14 +377,11 @@ class HandTrackerEdge:
                 vec_ltl_high.append(norm_landmarks[i][20][:] - norm_landmarks[i][19][:])
                 angle_ltl.append(math.acos(np.dot(vec_ltl_high[i], vec_ltl_low[i]) / (np.linalg.norm(vec_ltl_low[i]) * np.linalg.norm(vec_ltl_high[i]))))
 
-            thumb_debug = self._compute_thumb_commands(
-                index_hand_left, index_hand_right, angle_thumb, angle_thumb2
-            )
-            self._apply_thumb_commands(thumb_debug)
-
             if index_hand_left > -1:
                 self.apply_joint_trajectory("upper_arm_right_rotation", -0.5 * shoulder_horizontal_left)
                 self.apply_joint_trajectory("shoulder_vertical_right", 0.5 * shoulder_vertical_left - 1000)
+                value_thumb_stretch = angle_thumb[index_hand_left] * 5000 - 9000
+                self.apply_joint_trajectory("thumb_right_opposition", -2*value_thumb_stretch)
                 value_idx = angle_idx[index_hand_left] * 5000 - 6000
                 self.apply_joint_trajectory("index_right_stretch", -value_idx)
                 value_mid = angle_mid[index_hand_left] * 5000 - 9000
@@ -511,6 +396,8 @@ class HandTrackerEdge:
             if index_hand_right > -1:
                 self.apply_joint_trajectory("upper_arm_left_rotation", 0.5 * shoulder_horizontal_right)
                 self.apply_joint_trajectory("shoulder_vertical_left", -0.5 * shoulder_vertical_right - 1000)
+                value_thumb_stretch = angle_thumb[index_hand_right] * 5000 - 9000
+                self.apply_joint_trajectory("thumb_left_opposition", -2*value_thumb_stretch)
                 value_idx = angle_idx[index_hand_right] * 5000 - 9000
                 self.apply_joint_trajectory("index_left_stretch", -value_idx)
                 value_mid = angle_mid[index_hand_right] * 5000 - 9000
@@ -553,9 +440,6 @@ class HandTrackerEdge:
                 self.nb_frames_lm_inference += 1
                 self.nb_lm_inferences += res["nb_lm_inf"]
                 self.nb_failed_lm_inferences += res["nb_lm_inf"] - len(hands)
-
-        if self.debug_thumbs:
-            self._log_thumb_debug(thumb_debug)
 
         self.flush_joint_trajectory()
         return video_frame, hands, None

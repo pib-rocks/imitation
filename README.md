@@ -39,15 +39,6 @@ Optional flags:
 
 - `-o OUTPUT` — save annotated video
 - `-t [LEVEL]` — debug trace (1=app info, 2=low-level, 4=ImageManip windows, 8=save manager script)
-- `--debug-thumbs` — print thumb motor command values to the console (helps tune scale factors)
-- `--debug-thumbs-every N` — with `--debug-thumbs`, print every N frames (default: 10)
-
-```bash
-python demo.py --debug-thumbs
-python demo.py --debug-thumbs --debug-thumbs-every 5
-```
-
-Thumb debug output shows all four pib thumb joints (`thumb_left/right_opposition` and `thumb_left/right_stretch`). Opposition values are sent to the robot; stretch values are computed for tuning but not yet commanded.
 
 Press `q` or Esc to quit.
 
