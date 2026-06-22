@@ -12,10 +12,12 @@ import sys
 from string import Template
 import marshal
 import math
+import threading
 
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from datatypes.srv import ApplyJointTrajectory
 import rclpy
+from rclpy.executors import SingleThreadedExecutor
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PALM_DETECTION_MODEL = str(SCRIPT_DIR / "models/palm_detection_sh4.blob")
@@ -202,7 +204,18 @@ class HandTracker:
                 ApplyJointTrajectory,
                 'apply_joint_trajectory'
             )
-            self.apply_joint_trajectory_client.wait_for_service()
+            self._pending_joint_commands: dict[str, float] = {}
+            self._executor = SingleThreadedExecutor()
+            self._executor.add_node(self.node)
+            self._spin_thread = threading.Thread(
+                target=self._executor.spin, daemon=True
+            )
+            self._spin_thread.start()
+            if not self.apply_joint_trajectory_client.wait_for_service(timeout_sec=15.0):
+                self.node.get_logger().warn(
+                    "apply_joint_trajectory service not available after 15s; "
+                    "motor commands will be sent once the service appears"
+                )
 
             if self.crop:
                 self.frame_size, self.scale_nd = mpu.find_isp_scale_params(internal_frame_height, self.resolution)
@@ -247,21 +260,33 @@ class HandTracker:
         self.nb_frames_lm_inference_after_landmarks_ROI = 0
         self.nb_frames_no_hand = 0
 
-    def apply_joint_trajectory(self, motor_name: str, position: int) -> None:
-        # Service Request zusammenbauen
-        #print("setting motor  "+motor_name)
+    def apply_joint_trajectory(self, motor_name: str, position: float) -> None:
+        self._pending_joint_commands[motor_name] = float(position)
+
+    def _on_trajectory_done(self, future) -> None:
+        try:
+            result = future.result()
+            if not result.successful:
+                self.node.get_logger().warn("apply_joint_trajectory returned unsuccessful")
+        except Exception as exc:
+            self.node.get_logger().error(f"apply_joint_trajectory failed: {exc}")
+
+    def flush_joint_trajectory(self) -> None:
+        if not self._pending_joint_commands:
+            return
+
         request = ApplyJointTrajectory.Request()
-        point = JointTrajectoryPoint()
-        point.positions.append(float(position)) 
         jt = JointTrajectory()
-        jt.joint_names = [motor_name]
-        jt.points = [point]
+        jt.joint_names = list(self._pending_joint_commands.keys())
+        jt.points = []
+        for position in self._pending_joint_commands.values():
+            point = JointTrajectoryPoint()
+            point.positions.append(position)
+            jt.points.append(point)
         request.joint_trajectory = jt
-        # Anfrage senden und warten
-        self.apply_joint_trajectory_client.call_async(request)
-        #rclpy.spin_until_future_complete(self.node, future)
-        # Antwort auswerten
-        #response: ApplyJointTrajectory.Response = future.result()
+        future = self.apply_joint_trajectory_client.call_async(request)
+        future.add_done_callback(self._on_trajectory_done)
+        self._pending_joint_commands.clear()
 
     def create_pipeline(self):
         print("Creating pipeline...")
@@ -739,12 +764,19 @@ class HandTracker:
                 self.nb_lm_inferences += res["nb_lm_inf"]
                 self.nb_failed_lm_inferences += res["nb_lm_inf"] - len(hands)
 
+        self.flush_joint_trajectory()
         return video_frame, hands, None
 
 
     def exit(self):
         self.device.close()
-        ipcon.disconnect()
+        if hasattr(self, "_executor"):
+            self._executor.shutdown()
+            self._spin_thread.join(timeout=2.0)
+        if hasattr(self, "node"):
+            self.node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
         # Print some stats
         if self.stats:
             nb_frames = self.fps.nb_frames()
