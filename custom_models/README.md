@@ -5,8 +5,6 @@
 In Edge mode, we want to do the post processing of the Palm Detection model on the device. As the post processing includes computations on large arrays, the method chosen consists in implementaing these calculations in a Pytorch nn.Module, following the method described in the [rahulrav's blog](https://rahulrav.com/blog/depthai_camera.html).
 The pytorch module is exported in ONNX format then converted into OpenVINO IR and finally into a blob file `PDPostProcessing_top2_sh1.blob`.
 
-*Note that in Host mode, the same post processing is done on the host with numpy and OpenCV nms function.*
-
 ## Install
 
 To generate the Post Processing model, some python packages are needed: torch, onnx, onnx-simplifier, onnx_graphsurgeon. They can be installed with the following command:
@@ -32,15 +30,10 @@ The script `generate_postproc_onnx.py` defines the pytorch nn.Module *PDPostProc
 
 ## Convert to a blob file
 
-Start the tflite2tensorflow docker container (here we just use the OpenVINO distribution of the container, not the PINTO's tools):
-```
-# From custom_models directory
-> ../docker_tflite2tensorflow.sh
-```
+From the `custom_models` directory, run `convert_model.sh` in an OpenVINO / Model Optimizer environment to produce `PDPostProcessing_top2_sh1.blob`:
 
-Then, from the container shell, `convert_model.sh` converts the ONNX patched model to OpenVINO IR format wihich is compiled into `PDPostProcessing_top2_sh1.blob`:
 ```
-./convert_model.sh  # Add `-s #` if you want to specify a number of shaves other than 1
+./convert_model.sh  # Add `-s #` to specify a number of shaves other than 1
 ```
 
 

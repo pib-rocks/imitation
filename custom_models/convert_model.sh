@@ -1,4 +1,4 @@
-# This script has to be run from the docker container started by ./docker_tflite2tensorflow.sh
+# Run from custom_models/ in an environment with OpenVINO Model Optimizer and blobconverter.
 
 usage ()
 {
