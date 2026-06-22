@@ -375,13 +375,13 @@ class HandTrackerEdge:
             print(f"[thumb] batch  {'  '.join(batch_parts)}", flush=True)
 
     def _apply_thumb_commands(self, thumb: dict) -> None:
-        if thumb["thumb_right_opposition"] is not None:
+        if thumb["thumb_right_strech"] is not None:
             self.apply_joint_trajectory(
-                "thumb_right_opposition", thumb["thumb_right_opposition"]
+                "thumb_right_opposition", 2* thumb["thumb_right_stretch"]
             )
-        if thumb["thumb_left_opposition"] is not None:
+        if thumb["thumb_left_stretch"] is not None:
             self.apply_joint_trajectory(
-                "thumb_left_opposition", thumb["thumb_left_opposition"]
+                "thumb_left_opposition", 2* thumb["thumb_left_stretch"]
             )
 
     def next_frame(self):
