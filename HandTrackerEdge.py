@@ -381,7 +381,7 @@ class HandTrackerEdge:
                 self.apply_joint_trajectory("upper_arm_right_rotation", -0.5 * shoulder_horizontal_left)
                 self.apply_joint_trajectory("shoulder_vertical_right", 0.5 * shoulder_vertical_left - 1000)
                 value_thumb_stretch = angle_thumb[index_hand_left] * 5000 - 9000
-                self.apply_joint_trajectory("thumb_right_opposition", -2*value_thumb_stretch)
+                self.apply_joint_trajectory("thumb_right_opposition", -3*value_thumb_stretch)
                 value_idx = angle_idx[index_hand_left] * 5000 - 6000
                 self.apply_joint_trajectory("index_right_stretch", -value_idx)
                 value_mid = angle_mid[index_hand_left] * 5000 - 9000
@@ -397,7 +397,7 @@ class HandTrackerEdge:
                 self.apply_joint_trajectory("upper_arm_left_rotation", 0.5 * shoulder_horizontal_right)
                 self.apply_joint_trajectory("shoulder_vertical_left", -0.5 * shoulder_vertical_right - 1000)
                 value_thumb_stretch = angle_thumb[index_hand_right] * 5000 - 9000
-                self.apply_joint_trajectory("thumb_left_opposition", -2*value_thumb_stretch)
+                self.apply_joint_trajectory("thumb_left_opposition", -3*value_thumb_stretch)
                 value_idx = angle_idx[index_hand_right] * 5000 - 9000
                 self.apply_joint_trajectory("index_left_stretch", -value_idx)
                 value_mid = angle_mid[index_hand_right] * 5000 - 9000
