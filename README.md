@@ -32,7 +32,7 @@ See [custom_models/README.md](custom_models/README.md) for building the PD post-
 Start the motors stack, then:
 
 ```bash
-python demo.py
+python imitation.py
 ```
 
 Optional flags:
@@ -45,7 +45,7 @@ Press `q` or Esc to quit.
 ## Architecture
 
 ```
-demo.py
+imitation.py
   └── HandTrackerEdge   OAK camera + DepthAI pipeline + joint-angle mapping
         └── ROS2 apply_joint_trajectory service  →  pib motor_control
   └── HandTrackerRenderer   OpenCV preview overlay
