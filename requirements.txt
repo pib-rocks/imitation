@@ -1,3 +1,4 @@
-opencv-python >= 4.5.1.48
-depthai>=2.13
+opencv-python==4.11.0.86
+numpy==1.26.4
+depthai==2.30
 # ROS2 packages (rclpy, datatypes, trajectory_msgs) come from the pib-backend ROS overlay
