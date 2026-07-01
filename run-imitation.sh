@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The ROS camera container holds the camera device; stop it before starting imitation.
+ROS_CAMERA_CONTAINER="multirepo-ros-camera-1"
+echo "Shutting down $ROS_CAMERA_CONTAINER if running ..."
+if echo "pib" | sudo -S docker ps --format '{{.Names}}' | grep -qx "$ROS_CAMERA_CONTAINER"; then
+    echo "pib" | sudo -S docker stop "$ROS_CAMERA_CONTAINER"
+    echo "Stopped $ROS_CAMERA_CONTAINER."
+else
+    echo "$ROS_CAMERA_CONTAINER is not running."
+fi
+
 # Resolve the directory this script lives in, so it works from anywhere.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
