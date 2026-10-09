@@ -92,8 +92,32 @@ def normalize_radians(angle):
 # 2 = hand landmark branch
 send_new_frame_to_branch = 1
 
+def tensor_values(nn_data, name):
+    # getLayerFp16 is gone in 3.6.1. getTensor is the same on-device read;
+    # flatten so the crop maths below still indexes a flat list of floats.
+    tensor = nn_data.getTensor(name)
+    values = []
+    pending = [tensor]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, (int, float)):
+            values.append(float(item))
+            continue
+        try:
+            count = len(item)
+        except Exception:
+            values.append(float(item))
+            continue
+        if isinstance(item, str):
+            values.append(float(item))
+            continue
+        for index in range(count - 1, -1, -1):
+            pending.append(item[index])
+    return values
+
 cfg_pre_pd = ImageManipConfig()
-cfg_pre_pd.setResizeThumbnail(128, 128, 0, 0, 0)
+cfg_pre_pd.setOutputSize(128, 128, ImageManipConfig.ResizeMode.LETTERBOX)
+cfg_pre_pd.setBackgroundColor(0, 0, 0)
 
 id_wrist = 0
 id_index_mcp = 5
@@ -115,7 +139,7 @@ while True:
         node.io['pre_pd_manip_cfg'].send(cfg_pre_pd)
         ${_TRACE2} ("Manager sent thumbnail config to pre_pd manip")
         # Wait for pd post processing's result 
-        detection = node.io['from_post_pd_nn'].get().getLayerFp16("result")
+        detection = tensor_values(node.io['from_post_pd_nn'].get(), "result")
         ${_TRACE2} (f"Manager received pd result (len={len(detection)}) : "+str(detection))
         # detection is list of 2x8 float
         # Looping the detection twice to obtain data for 2 hands
@@ -163,8 +187,8 @@ while True:
         rr.size.height = sqn_rr_size * frame_size / img_h
         rr.angle       = degrees(rotation)
         cfg = ImageManipConfig()
-        cfg.setCropRotatedRect(rr, True)
-        cfg.setResize(lm_input_size, lm_input_size)
+        cfg.addCropRotatedRect(rr, True)
+        cfg.setOutputSize(lm_input_size, lm_input_size, ImageManipConfig.ResizeMode.STRETCH)
         ${_IF_USE_SAME_IMAGE}
         reuse_prev_image = True if len(detected_hands) > 1 and i == last_hand else False
         cfg.setReusePreviousImage(reuse_prev_image)
@@ -185,15 +209,15 @@ while True:
         # Wait for lm's result
         lm_result = node.io['from_lm_nn'].get()
         ${_TRACE2} ("Manager received result from lm nn")
-        lm_score = lm_result.getLayerFp16("Identity_1")[0]
+        lm_score = tensor_values(lm_result, "Identity_1")[0]
         if lm_score > ${_lm_score_thresh}:
-            handedness = lm_result.getLayerFp16("Identity_2")[0]
+            handedness = tensor_values(lm_result, "Identity_2")[0]
             
            
-            rrn_lms = lm_result.getLayerFp16("Identity_dense/BiasAdd/Add")
+            rrn_lms = tensor_values(lm_result, "Identity_dense/BiasAdd/Add")
             world_lms = 0
             ${_IF_USE_WORLD_LANDMARKS}
-            world_lms = lm_result.getLayerFp16("Identity_3_dense/BiasAdd/Add")
+            world_lms = tensor_values(lm_result, "Identity_3_dense/BiasAdd/Add")
             ${_IF_USE_WORLD_LANDMARKS}
             # Retroproject landmarks into the original squared image 
             sqn_lms = []

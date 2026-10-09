@@ -63,7 +63,8 @@ class HandTrackerEdge:
         self.use_same_image = use_same_image
         self.angle_array_final = angle_array_final if angle_array_final is not None else []
 
-        self.device = dai.Device()
+        self.pipeline = None
+        self.device = None
         self.video_fps = self.internal_fps
 
         rclpy.init()
@@ -95,19 +96,11 @@ class HandTrackerEdge:
         self.crop_w = 0
         print(f"Internal camera image size: {self.img_w} x {self.img_h} - pad_h: {self.pad_h}")
 
+        self.pipeline = self.create_pipeline()
+        self.device = self.pipeline.getDefaultDevice()
         usb_speed = self.device.getUsbSpeed()
-        self.device.startPipeline(self.create_pipeline())
+        self.pipeline.start()
         print(f"Pipeline started - USB speed: {str(usb_speed).split('.')[-1]}")
-
-        self.q_video = self.device.getOutputQueue(name="cam_out", maxSize=1, blocking=False)
-        self.q_manager_out = self.device.getOutputQueue(name="manager_out", maxSize=1, blocking=False)
-        if self.trace & 4:
-            self.q_pre_pd_manip_out = self.device.getOutputQueue(
-                name="pre_pd_manip_out", maxSize=1, blocking=False
-            )
-            self.q_pre_lm_manip_out = self.device.getOutputQueue(
-                name="pre_lm_manip_out", maxSize=1, blocking=False
-            )
 
         self.fps = FPS()
         self.nb_frames_pd_inference = 0
@@ -148,24 +141,20 @@ class HandTrackerEdge:
     def create_pipeline(self):
         print("Creating pipeline...")
         pipeline = dai.Pipeline()
-        pipeline.setOpenVINOVersion(version=dai.OpenVINO.Version.VERSION_2021_4)
         self.pd_input_length = 128
 
         print("Creating Color Camera...")
-        cam = pipeline.createColorCamera()
+        cam = pipeline.create(dai.node.ColorCamera)
         cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
-        cam.setBoardSocket(dai.CameraBoardSocket.RGB)
+        cam.setBoardSocket(dai.CameraBoardSocket.CAM_A)
         cam.setInterleaved(False)
         cam.setIspScale(self.scale_nd[0], self.scale_nd[1])
         cam.setFps(self.internal_fps)
         cam.setVideoSize(self.img_w, self.img_h)
         cam.setPreviewSize(self.img_w, self.img_h)
-
-        cam_out = pipeline.createXLinkOut()
-        cam_out.setStreamName("cam_out")
-        cam_out.input.setQueueSize(1)
-        cam_out.input.setBlocking(False)
-        cam.video.link(cam_out.input)
+        # Preview frames for the host renderer. The crop and inference path
+        # stays on the device and does not travel through this queue.
+        self.q_video = cam.video.createOutputQueue(maxSize=1, blocking=False)
 
         manager_script = pipeline.create(dai.node.Script)
         manager_script.setScript(self.build_manager_script())
@@ -173,16 +162,14 @@ class HandTrackerEdge:
         print("Creating Palm Detection pre processing image manip...")
         pre_pd_manip = pipeline.create(dai.node.ImageManip)
         pre_pd_manip.setMaxOutputFrameSize(self.pd_input_length * self.pd_input_length * 3)
-        pre_pd_manip.setWaitForConfigInput(True)
-        pre_pd_manip.inputImage.setQueueSize(1)
+        pre_pd_manip.inputConfig.setWaitForMessage(True)
+        pre_pd_manip.inputImage.setMaxSize(1)
         pre_pd_manip.inputImage.setBlocking(False)
         cam.preview.link(pre_pd_manip.inputImage)
         manager_script.outputs['pre_pd_manip_cfg'].link(pre_pd_manip.inputConfig)
 
         if self.trace & 4:
-            pre_pd_manip_out = pipeline.createXLinkOut()
-            pre_pd_manip_out.setStreamName("pre_pd_manip_out")
-            pre_pd_manip.out.link(pre_pd_manip_out.input)
+            self.q_pre_pd_manip_out = pre_pd_manip.out.createOutputQueue(maxSize=1, blocking=False)
 
         print("Creating Palm Detection Neural Network...")
         pd_nn = pipeline.create(dai.node.NeuralNetwork)
@@ -195,23 +182,21 @@ class HandTrackerEdge:
         pd_nn.out.link(post_pd_nn.input)
         post_pd_nn.out.link(manager_script.inputs['from_post_pd_nn'])
 
-        manager_out = pipeline.create(dai.node.XLinkOut)
-        manager_out.setStreamName("manager_out")
-        manager_script.outputs['host'].link(manager_out.input)
+        # Marshalled hand results for the host joint mapper. The Script still
+        # produces them on the device; this queue only receives the result.
+        self.q_manager_out = manager_script.outputs['host'].createOutputQueue(maxSize=1, blocking=False)
 
         print("Creating Hand Landmark pre processing image manip...")
         self.lm_input_length = 224
         pre_lm_manip = pipeline.create(dai.node.ImageManip)
         pre_lm_manip.setMaxOutputFrameSize(self.lm_input_length * self.lm_input_length * 3)
-        pre_lm_manip.setWaitForConfigInput(True)
-        pre_lm_manip.inputImage.setQueueSize(1)
+        pre_lm_manip.inputConfig.setWaitForMessage(True)
+        pre_lm_manip.inputImage.setMaxSize(1)
         pre_lm_manip.inputImage.setBlocking(False)
         cam.preview.link(pre_lm_manip.inputImage)
 
         if self.trace & 4:
-            pre_lm_manip_out = pipeline.createXLinkOut()
-            pre_lm_manip_out.setStreamName("pre_lm_manip_out")
-            pre_lm_manip.out.link(pre_lm_manip_out.input)
+            self.q_pre_lm_manip_out = pre_lm_manip.out.createOutputQueue(maxSize=1, blocking=False)
 
         manager_script.outputs['pre_lm_manip_cfg'].link(pre_lm_manip.inputConfig)
 
@@ -445,7 +430,8 @@ class HandTrackerEdge:
         return video_frame, hands, None
 
     def exit(self):
-        self.device.close()
+        if self.pipeline is not None:
+            self.pipeline.stop()
         if hasattr(self, "_executor"):
             self._executor.shutdown()
             self._spin_thread.join(timeout=2.0)
